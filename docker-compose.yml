@@ -1,0 +1,176 @@
+version: "3.9"
+
+# ============================================================
+# Medicare Claim Denial Intelligence Platform
+# Docker Compose Stack: PostgreSQL 16 + Apache Airflow 2.9 + pgAdmin 4
+# ============================================================
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.9.3
+  env_file:
+    - .env
+  environment:
+    # Core
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    # Database
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    # Webserver
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    # Logging
+    AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+    # Disable default connections
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: UTC
+    # Python path for custom modules
+    PYTHONPATH: /opt/airflow
+  volumes:
+    - airflow_dags:/opt/airflow/dags
+    - airflow_logs:/opt/airflow/logs
+    - ./ingestion:/opt/airflow/ingestion
+    - ./dbt:/opt/airflow/dbt
+    - ./data:/opt/airflow/data
+  depends_on:
+    postgres:
+      condition: service_healthy
+  networks:
+    - denial_network
+
+services:
+  # ──────────────────────────────────────────────────────────
+  # PostgreSQL 16 — primary data store + Airflow metadata DB
+  # ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: denial_postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./ingestion/scripts/init_schemas.sql:/docker-entrypoint-initdb.d/01_init_schemas.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - denial_network
+
+  # ──────────────────────────────────────────────────────────
+  # pgAdmin 4 — PostgreSQL web UI
+  # Access at http://localhost:5050
+  # ──────────────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: denial_pgadmin
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - denial_network
+
+  # ──────────────────────────────────────────────────────────
+  # Airflow DB Init — runs once to initialize metadata DB
+  # ──────────────────────────────────────────────────────────
+  airflow-init:
+    <<: *airflow-common
+    container_name: denial_airflow_init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db upgrade &&
+        airflow users create \
+          --username ${AIRFLOW_ADMIN_USER} \
+          --password ${AIRFLOW_ADMIN_PASSWORD} \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@denial.local || true
+    restart: "no"
+
+  # ──────────────────────────────────────────────────────────
+  # Airflow Webserver — UI at http://localhost:8080
+  # ──────────────────────────────────────────────────────────
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: denial_airflow_webserver
+    restart: unless-stopped
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ──────────────────────────────────────────────────────────
+  # Airflow Scheduler — LocalExecutor scheduler
+  # ──────────────────────────────────────────────────────────
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: denial_airflow_scheduler
+    restart: unless-stopped
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+# ──────────────────────────────────────────────────────────
+# Named Volumes
+# ──────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+  airflow_dags:
+    driver: local
+  airflow_logs:
+    driver: local
+
+# ──────────────────────────────────────────────────────────
+# Networks
+# ──────────────────────────────────────────────────────────
+networks:
+  denial_network:
+    driver: bridge
+    name: denial_network

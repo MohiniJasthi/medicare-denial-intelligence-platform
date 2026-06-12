@@ -1,0 +1,81 @@
+version: 2
+
+sources:
+  - name: raw_cms
+    description: >
+      Raw CMS (Centers for Medicare & Medicaid Services) datasets loaded from
+      bulk downloads into the PostgreSQL `raw` schema via the ingestion pipeline.
+    schema: raw
+    loader: custom_python_ingestion
+    loaded_at_field: _loaded_at
+
+    tables:
+      - name: cms_part_d_spending
+        description: >
+          Medicare Part D Drug Spending by Provider and Drug. Contains
+          prescribing data at the provider-drug level including claim counts,
+          beneficiary counts, total drug costs, and day supply. Source:
+          CMS Medicare Part D Prescribers dataset.
+        columns:
+          - name: npi
+            description: National Provider Identifier (10-digit unique provider ID)
+          - name: nppes_provider_last_org_name
+            description: Provider last name or organization name from NPPES registry
+          - name: drug_name
+            description: Brand name of the drug prescribed
+          - name: generic_name
+            description: Generic (chemical) name of the drug
+          - name: total_claim_count
+            description: Total number of Part D claims (including refills)
+          - name: total_drug_cost
+            description: Total drug cost paid by Medicare Part D in USD
+
+      - name: cms_provider_utilization
+        description: >
+          Medicare Provider Utilization and Payment Data. Contains service
+          utilization statistics at the provider-HCPCS procedure code level,
+          including average submitted charges, Medicare allowed amounts, and
+          Medicare payments. Source: CMS Medicare Physician and Other
+          Practitioners dataset.
+        columns:
+          - name: npi
+            description: National Provider Identifier
+          - name: hcpcs_code
+            description: Healthcare Common Procedure Coding System (HCPCS) code
+          - name: hcpcs_description
+            description: Description of the HCPCS service or procedure
+          - name: line_srvc_cnt
+            description: Number of services provided
+          - name: average_medicare_payment_amt
+            description: Average amount Medicare paid after deductible and coinsurance
+
+      - name: cms_open_payments
+        description: >
+          CMS Open Payments (Sunshine Act) dataset tracking financial
+          relationships between pharmaceutical/device manufacturers and
+          healthcare providers. Used to engineer features for denial prediction.
+        columns:
+          - name: physician_npi
+            description: NPI of the receiving physician
+          - name: total_amount_of_payment_usdollars
+            description: Dollar amount of the payment or transfer of value
+          - name: nature_of_payment_or_transfer_of_value
+            description: Category of payment (e.g. Food and Beverage, Education)
+
+      - name: nppes_providers
+        description: >
+          National Plan and Provider Enumeration System (NPPES) NPI Registry.
+          The authoritative source for provider demographics, taxonomy codes,
+          practice addresses, and credentials. Bulk file downloaded from
+          https://download.cms.gov/nppes/NPI_Files.html
+        columns:
+          - name: npi
+            description: National Provider Identifier (primary key)
+          - name: entity_type_code
+            description: "1 = Individual provider, 2 = Organization"
+          - name: provider_last_name
+            description: Provider last name (individual providers only)
+          - name: provider_organization_name
+            description: Organization name (entity type 2 only)
+          - name: healthcare_provider_taxonomy_code_1
+            description: Primary specialty taxonomy code from NUCC taxonomy table

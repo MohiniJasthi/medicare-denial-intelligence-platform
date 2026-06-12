@@ -1,0 +1,25 @@
+denial_platform:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'localhost') }}"
+      port: 5432
+      dbname: denial_db
+      user: denial_user
+      password: "{{ env_var('POSTGRES_PASSWORD') }}"
+      schema: public
+      threads: 4
+      connect_timeout: 10
+      keepalives_idle: 0
+
+    prod:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'localhost') }}"
+      port: 5432
+      dbname: denial_db
+      user: denial_user
+      password: "{{ env_var('POSTGRES_PASSWORD') }}"
+      schema: public
+      threads: 8
+      connect_timeout: 10

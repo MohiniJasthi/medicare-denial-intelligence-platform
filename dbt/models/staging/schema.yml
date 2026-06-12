@@ -1,0 +1,156 @@
+version: 2
+
+models:
+  - name: stg_cms_part_d_spending
+    description: >
+      Staged Medicare Part D drug spending by provider and drug.
+      Casts types, renames columns, filters nulls.
+      One row per NPI × drug × year combination.
+    columns:
+      - name: spending_id
+        description: "MD5 surrogate key: npi + drug_name + year"
+        tests:
+          - unique
+          - not_null
+
+      - name: npi
+        description: National Provider Identifier (10-digit string)
+        tests:
+          - not_null
+
+      - name: provider_name
+        description: Provider last name or organization name
+
+      - name: provider_first_name
+        description: Provider first name (individual providers only)
+
+      - name: provider_city
+        description: Provider practice city
+
+      - name: provider_state
+        description: Provider practice state (2-letter abbreviation)
+
+      - name: specialty
+        description: Provider specialty description from CMS
+
+      - name: drug_name
+        description: Brand name of the drug
+
+      - name: generic_name
+        description: Generic / chemical name of the drug
+
+      - name: bene_count
+        description: Number of unique Medicare beneficiaries (NULL if CMS-suppressed <11)
+
+      - name: total_claim_count
+        description: Total Part D claims including refills
+        tests:
+          - not_null
+
+      - name: total_day_supply
+        description: Total days supply across all claims
+
+      - name: total_drug_cost
+        description: Total drug cost paid by Medicare Part D in USD
+
+      - name: year
+        description: Reporting year from CMS dataset
+
+      - name: _loaded_at
+        description: Timestamp when this row was loaded by dbt
+
+  - name: stg_cms_provider_utilization
+    description: >
+      Staged Medicare provider utilization and payment data.
+      One row per provider-HCPCS code pair.
+      Includes implied withholding rate derived from allowed vs. paid amounts.
+    columns:
+      - name: utilization_id
+        description: "MD5 surrogate key: npi + hcpcs_code"
+        tests:
+          - unique
+          - not_null
+
+      - name: npi
+        description: National Provider Identifier
+        tests:
+          - not_null
+
+      - name: hcpcs_code
+        description: HCPCS procedure / service code
+        tests:
+          - not_null
+
+      - name: provider_name
+        description: Provider last name or organization name
+
+      - name: specialty
+        description: Provider type / specialty
+
+      - name: service_count
+        description: Total number of services provided for this HCPCS code
+
+      - name: unique_beneficiary_count
+        description: Number of distinct beneficiaries receiving this service
+
+      - name: avg_allowed_amount
+        description: Average Medicare allowed amount per service (USD)
+
+      - name: avg_submitted_charge
+        description: Average charge submitted by the provider (USD)
+
+      - name: avg_medicare_payment
+        description: Average amount Medicare actually paid (USD)
+
+      - name: implied_withhold_rate
+        description: >
+          1 - (avg_medicare_payment / avg_allowed_amount).
+          Proxy for denial / adjustment rate; higher = more withheld.
+
+      - name: _loaded_at
+        description: Timestamp when this row was loaded by dbt
+
+  - name: stg_nppes_providers
+    description: >
+      Staged NPI provider registry from NPPES bulk download.
+      Deduplicated to one row per NPI.
+      Used as the canonical provider dimension for all joins.
+    columns:
+      - name: npi
+        description: National Provider Identifier (primary key)
+        tests:
+          - unique
+          - not_null
+
+      - name: entity_type
+        description: "1 = Individual provider, 2 = Organization"
+
+      - name: org_name
+        description: Organization name (entity type 2 only)
+
+      - name: last_name
+        description: Provider last name (entity type 1 only)
+
+      - name: first_name
+        description: Provider first name (entity type 1 only)
+
+      - name: credentials
+        description: Provider credential text (e.g. MD, DO, NP)
+
+      - name: city
+        description: Practice location city
+
+      - name: state
+        description: Practice location state
+
+      - name: zip
+        description: Practice location ZIP code
+
+      - name: primary_taxonomy_code
+        description: NUCC taxonomy code for provider's primary specialty
+
+      - name: is_sole_proprietor
+        description: Whether the provider is a sole proprietor (Y/N)
+
+      - name: _loaded_at
+        description: Timestamp when this row was loaded by dbt

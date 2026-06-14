@@ -44,7 +44,7 @@ try:
 except ImportError:
     _dotenv_loaded = False
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+# ── Logging ──
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -52,10 +52,10 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# ── Configuration ──
 DATA_DIR = Path(os.environ.get("DATA_DIR", "data/raw"))
 RAW_SCHEMA = "raw"
-CHUNK_SIZE = 50_000  # rows per chunk for large files
+CHUNK_SIZE = 50000  # rows per chunk for large files
 
 # PostgreSQL connection from environment
 PG_USER = os.environ.get("POSTGRES_USER", "denial_user")
@@ -73,7 +73,7 @@ CANONICAL_TABLE_MAP = {
 }
 
 
-# ── Database helpers ──────────────────────────────────────────────────────────
+# ── Database helpers ──
 
 def get_engine() -> Engine:
     """Build a SQLAlchemy engine from environment variables."""
@@ -197,7 +197,7 @@ def get_row_count(engine: Engine, schema: str, table: str) -> int:
         return result.scalar()
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Main ───
 
 def main() -> None:
     log.info("=" * 60)
@@ -241,7 +241,7 @@ def main() -> None:
             log.error(f"Failed to load {csv_path.name}: {e}", exc_info=True)
 
     # Final row count verification
-    log.info("\n── Row Count Verification ───────────────────────────────────")
+    log.info("\n── Row Count Verification ──")
     for table_name in summary:
         try:
             db_count = get_row_count(engine, RAW_SCHEMA, table_name)

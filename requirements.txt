@@ -12,8 +12,9 @@ psycopg2-binary>=2.9.9
 python-dotenv>=1.0.0
 
 # ── dbt (PostgreSQL adapter) ─────────────────────────────────
+# Note: dbt-postgres versions are independent from dbt-core (max 1.8.x adapter is 1.8.2)
 dbt-core==1.8.9
-dbt-postgres==1.8.9
+dbt-postgres==1.8.2
 
 # ── Data Download ─────────────────────────────────────────────
 requests>=2.31.0

@@ -1,14 +1,8 @@
 /*
   stg_cms_part_d_spending
   ========================
-  Staged Medicare Part D Drug Spending by Provider and Drug.
-  One row per provider (NPI) × drug × year.
-
-  Transformations:
-    - Renames columns to snake_case analytical names
-    - Casts numeric strings to proper types
-    - Filters out rows with null NPI (ungrouped summary rows in CMS data)
-    - Generates a surrogate key from npi + drug_name + year
+  CMS grain: NPI × brand name × generic name × year.
+  Surrogate key includes all four; dedupe exact duplicate raw rows.
 */
 
 with source as (
@@ -20,46 +14,73 @@ with source as (
 renamed as (
 
     select
-        -- Surrogate key (md5 instead of dbt_utils to avoid package dependency)
         md5(
-            coalesce(cast(npi as varchar), '') || '-' ||
-            coalesce(cast(drug_name as varchar), '') || '-' ||
+            coalesce(cast(prscrbr_npi as varchar), '') || '-' ||
+            coalesce(cast(brnd_name as varchar), '') || '-' ||
+            coalesce(cast(gnrc_name as varchar), '') || '-' ||
             coalesce(cast(year as varchar), '')
         )                                                       as spending_id,
 
-        -- Provider identifiers
-        cast(npi as varchar)                                    as npi,
-        cast(nppes_provider_last_org_name as varchar)           as provider_name,
-        cast(nppes_provider_first_name as varchar)              as provider_first_name,
-        cast(nppes_provider_city as varchar)                    as provider_city,
-        cast(nppes_provider_state as varchar)                   as provider_state,
-        cast(specialty_description as varchar)                  as specialty,
+        cast(prscrbr_npi as varchar)                            as npi,
+        cast(prscrbr_last_org_name as varchar)                  as provider_name,
+        cast(prscrbr_first_name as varchar)                     as provider_first_name,
+        cast(prscrbr_city as varchar)                           as provider_city,
+        cast(prscrbr_state_abrvtn as varchar)                   as provider_state,
+        cast(prscrbr_type as varchar)                           as specialty,
 
-        -- Drug details
-        cast(drug_name as varchar)                              as drug_name,
-        cast(generic_name as varchar)                           as generic_name,
+        cast(brnd_name as varchar)                              as drug_name,
+        cast(gnrc_name as varchar)                              as generic_name,
 
-        -- Metrics — suppress suppressed/blank values (CMS suppresses <11)
         case
-            when bene_count = '' or bene_count is null then null
-            else cast(bene_count as integer)
+            when tot_benes in ('', '*', 'NA') or tot_benes is null then null
+            else cast(tot_benes as integer)
         end                                                     as bene_count,
 
-        cast(total_claim_count as integer)                      as total_claim_count,
-        cast(total_day_supply as integer)                       as total_day_supply,
-        cast(total_drug_cost as numeric(18, 2))                 as total_drug_cost,
+        cast(tot_clms as integer)                               as total_claim_count,
+        cast(tot_day_suply as integer)                          as total_day_supply,
+        cast(tot_drug_cst as numeric(18, 2))                    as total_drug_cost,
 
-        -- Year partition (present in multi-year CMS exports)
         cast(year as integer)                                   as year,
-
-        -- Audit
+        cast(_loaded_at as timestamp)                             as source_loaded_at,
         current_timestamp                                       as _loaded_at
 
     from source
 
-    where npi is not null
-      and npi != ''
+    where prscrbr_npi is not null
+      and prscrbr_npi != ''
+
+),
+
+deduped as (
+
+    select
+        *,
+        row_number() over (
+            partition by spending_id
+            order by source_loaded_at desc nulls last
+        ) as rn
+
+    from renamed
 
 )
 
-select * from renamed
+select
+    spending_id,
+    npi,
+    provider_name,
+    provider_first_name,
+    provider_city,
+    provider_state,
+    specialty,
+    drug_name,
+    generic_name,
+    bene_count,
+    total_claim_count,
+    total_day_supply,
+    total_drug_cost,
+    year,
+    _loaded_at
+
+from deduped
+
+where rn = 1

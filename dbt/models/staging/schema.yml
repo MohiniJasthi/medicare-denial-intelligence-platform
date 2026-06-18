@@ -8,7 +8,7 @@ models:
       One row per NPI × drug × year combination.
     columns:
       - name: spending_id
-        description: "MD5 surrogate key: npi + drug_name + year"
+        description: "MD5 surrogate key: npi + drug_name + generic_name + year"
         tests:
           - unique
           - not_null
@@ -66,7 +66,7 @@ models:
       Includes implied withholding rate derived from allowed vs. paid amounts.
     columns:
       - name: utilization_id
-        description: "MD5 surrogate key: npi + hcpcs_code"
+        description: "MD5 surrogate key: npi + hcpcs_code + place_of_service + year"
         tests:
           - unique
           - not_null
@@ -87,6 +87,9 @@ models:
       - name: specialty
         description: Provider type / specialty
 
+      - name: place_of_service
+        description: CMS place of service code (office, facility, etc.)
+
       - name: service_count
         description: Total number of services provided for this HCPCS code
 
@@ -106,6 +109,9 @@ models:
         description: >
           1 - (avg_medicare_payment / avg_allowed_amount).
           Proxy for denial / adjustment rate; higher = more withheld.
+
+      - name: year
+        description: Reporting year from CMS dataset
 
       - name: _loaded_at
         description: Timestamp when this row was loaded by dbt

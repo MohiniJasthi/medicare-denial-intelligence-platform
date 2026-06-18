@@ -10,10 +10,15 @@ Datasets:
 
 Usage:
   python ingestion/scripts/download_cms_data.py
+  python ingestion/scripts/download_cms_data.py --list-urls --years 2023
+  python ingestion/scripts/download_cms_data.py --years 2023 --only part-d
 
 Environment variables (optional, override defaults):
   DATA_DIR      — target directory for raw files (default: data/raw)
   CMS_YEARS     — comma-separated years to download (default: 2021,2022,2023)
+
+Note: CMS changes direct download links frequently. This script resolves the
+current URL from https://data.cms.gov/data.json when static links fail.
 
 NPPES Manual Download Instructions:
   The NPPES full replacement monthly file is too large for automated download
@@ -23,11 +28,14 @@ NPPES Manual Download Instructions:
     3. Unzip and place the CSV at: data/raw/nppes_providers.csv
 """
 
+import argparse
 import os
 import sys
 import time
 import logging
+import zipfile
 from pathlib import Path
+from typing import Optional
 
 import requests
 from tqdm import tqdm
@@ -72,6 +80,27 @@ PROVIDER_UTIL_CSV_URLS = {
     2021: "https://data.cms.gov/provider-summary-by-type-of-service/medicare-physician-other-practitioners/medicare-physician-other-practitioners-by-provider-and-service/data/2021/Medicare_Physician_Other_Practitioners_by_Provider_and_Service_2021.csv",
     2022: "https://data.cms.gov/provider-summary-by-type-of-service/medicare-physician-other-practitioners/medicare-physician-other-practitioners-by-provider-and-service/data/2022/Medicare_Physician_Other_Practitioners_by_Provider_and_Service_2022.csv",
     2023: "https://data.cms.gov/provider-summary-by-type-of-service/medicare-physician-other-practitioners/medicare-physician-other-practitioners-by-provider-and-service/data/2023/Medicare_Physician_Other_Practitioners_by_Provider_and_Service_2023.csv",
+}
+
+CMS_CATALOG_URL = "https://data.cms.gov/data.json"
+
+# Dataset title fragments used to locate entries in data.cms.gov/data.json
+CATALOG_MATCHERS = {
+    "part_d": ["Medicare Part D Prescribers", "Provider and Drug"],
+    "provider_util": ["Medicare Physician", "Provider and Service"],
+}
+
+# Official dataset landing pages (use in browser if automated download fails)
+LANDING_PAGES = {
+    "part_d": (
+        "https://data.cms.gov/provider-summary-by-type-of-service/"
+        "medicare-part-d-prescribers/medicare-part-d-prescribers-by-provider-and-drug"
+    ),
+    "provider_util": (
+        "https://data.cms.gov/provider-summary-by-type-of-service/"
+        "medicare-physician-other-practitioners/"
+        "medicare-physician-other-practitioners-by-provider-and-service"
+    ),
 }
 
 
@@ -136,20 +165,168 @@ def download_file(url: str, dest_path: Path, description: str = "") -> bool:
 
 
 def check_cms_availability() -> bool:
-    """Ping the CMS API to verify connectivity."""
-    probe_url = "https://data.cms.gov/api/1/metastore/schemas/dataset/items?limit=1"
+    """Ping the CMS catalog to verify connectivity."""
     try:
-        resp = requests.head(probe_url, timeout=15)
-        log.info(f"CMS API reachable — HTTP {resp.status_code}")
+        resp = requests.head(CMS_CATALOG_URL, timeout=15)
+        log.info(f"CMS catalog reachable — HTTP {resp.status_code}")
         return resp.status_code < 400
     except Exception as e:
-        log.warning(f"CMS API probe failed: {e}")
+        log.warning(f"CMS catalog probe failed: {e}")
         return False
+
+
+def load_cms_catalog() -> list[dict]:
+    """Load the official CMS data catalog (data.json)."""
+    log.info(f"Fetching CMS catalog: {CMS_CATALOG_URL}")
+    response = requests.get(CMS_CATALOG_URL, timeout=120)
+    response.raise_for_status()
+    return response.json().get("dataset", [])
+
+
+def find_dataset_in_catalog(catalog: list[dict], dataset_key: str) -> Optional[dict]:
+    """Find a dataset entry by title keyword matching."""
+    keywords = CATALOG_MATCHERS[dataset_key]
+    for dataset in catalog:
+        title = dataset.get("title", "")
+        if all(keyword in title for keyword in keywords):
+            return dataset
+    return None
+
+
+def find_csv_url_in_catalog(dataset: dict, year: int) -> Optional[str]:
+    """Return the CSV downloadURL for a given year from a catalog dataset."""
+    year_str = str(year)
+    matches = []
+
+    for distro in dataset.get("distribution", []):
+        media_type = (distro.get("mediaType") or "").lower()
+        if media_type not in {"text/csv", "application/csv"}:
+            continue
+
+        blob = " ".join(
+            str(distro.get(field, ""))
+            for field in ("title", "description", "downloadURL", "temporal")
+        )
+        if year_str in blob:
+            matches.append(distro)
+
+    if not matches:
+        return None
+
+    # Prefer entries whose title/description explicitly mention the year.
+    matches.sort(
+        key=lambda d: (
+            year_str not in str(d.get("title", "")),
+            year_str not in str(d.get("description", "")),
+        )
+    )
+    return matches[0].get("downloadURL")
+
+
+def resolve_download_url(dataset_key: str, year: int, catalog: list[dict]) -> Optional[str]:
+    """
+    Resolve a download URL using:
+      1) CMS data.json catalog (current links)
+      2) Legacy static CSV URL map
+      3) CMS datastore CSV API template (Part D only)
+    """
+    dataset = find_dataset_in_catalog(catalog, dataset_key)
+    if dataset:
+        url = find_csv_url_in_catalog(dataset, year)
+        if url:
+            log.info(f"[{dataset_key} {year}] Resolved URL from CMS catalog")
+            return url
+
+    static_map = PART_D_CSV_URLS if dataset_key == "part_d" else PROVIDER_UTIL_CSV_URLS
+    if year in static_map:
+        log.info(f"[{dataset_key} {year}] Falling back to legacy static URL")
+        return static_map[year]
+
+    if dataset_key == "part_d":
+        log.info(f"[{dataset_key} {year}] Falling back to CMS datastore API URL")
+        return PART_D_URL_TEMPLATE.format(year=year)
+
+    return None
+
+
+def list_download_urls(years: list[int], datasets: list[str]) -> None:
+    """Print resolved download URLs without downloading files."""
+    catalog = load_cms_catalog()
+    log.info("\n── Resolved CMS download URLs ───────────────────────────────")
+    for dataset_key in datasets:
+        log.info(f"\n{dataset_key}:")
+        log.info(f"  Landing page: {LANDING_PAGES[dataset_key]}")
+        for year in years:
+            url = resolve_download_url(dataset_key, year, catalog)
+            log.info(f"  {year}: {url or 'NOT FOUND — use landing page manually'}")
+
+
+def extract_csv_from_zip(zip_path: Path, dest_csv: Path) -> bool:
+    """Extract the largest CSV from a downloaded ZIP into dest_csv."""
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        csv_members = [m for m in archive.namelist() if m.lower().endswith(".csv")]
+        if not csv_members:
+            log.error(f"No CSV found inside ZIP: {zip_path}")
+            return False
+        largest = max(csv_members, key=lambda name: archive.getinfo(name).file_size)
+        log.info(f"Extracting {largest} from {zip_path.name}")
+        with archive.open(largest) as src, open(dest_csv, "wb") as dst:
+            while True:
+                chunk = src.read(1024 * 1024)
+                if not chunk:
+                    break
+                dst.write(chunk)
+    zip_path.unlink(missing_ok=True)
+    return True
+
+
+def download_dataset_year(
+    dataset_key: str,
+    year: int,
+    dest: Path,
+    catalog: list[dict],
+) -> bool:
+    """Download one yearly file, handling CSV or ZIP responses."""
+    url = resolve_download_url(dataset_key, year, catalog)
+    if not url:
+        log.error(
+            f"[{dataset_key} {year}] No download URL found. "
+            f"Open manually: {LANDING_PAGES[dataset_key]}"
+        )
+        return False
+
+    label = f"{dataset_key} {year}"
+    temp_zip = dest.with_suffix(".zip.tmp")
+
+    # Try direct CSV download first.
+    if download_file(url, dest, description=label):
+        return True
+
+    # Some catalog links return ZIP archives.
+    log.info(f"[{label}] Direct CSV failed — trying ZIP response")
+    if download_file(url, temp_zip, description=f"{label} (zip)"):
+        try:
+            return extract_csv_from_zip(temp_zip, dest)
+        except zipfile.BadZipFile:
+            log.error(f"[{label}] Downloaded file is not a valid ZIP")
+            temp_zip.unlink(missing_ok=True)
+
+    log.error(
+        f"[{label}] All download methods failed.\n"
+        f"  1. Open: {LANDING_PAGES[dataset_key]}\n"
+        f"  2. Download the {year} CSV manually\n"
+        f"  3. Save as: {dest.resolve()}"
+    )
+    return False
 
 
 # ── Download functions ────────────────────────────────────────────────────────
 
-def download_part_d_data(data_dir: Path, years: list[int]) -> list[Path]:
+def download_part_d_data(
+    data_dir: Path,
+    years: list[int],
+    catalog: list[dict],
+) -> list[Path]:
     """Download Medicare Part D Prescribers by Provider and Drug for each year."""
     downloaded = []
     for year in years:
@@ -159,19 +336,17 @@ def download_part_d_data(data_dir: Path, years: list[int]) -> list[Path]:
             downloaded.append(dest)
             continue
 
-        url = PART_D_CSV_URLS.get(year)
-        if not url:
-            log.warning(f"[Part D {year}] No URL configured for year {year} — skipping")
-            continue
-
-        success = download_file(url, dest, description=f"Part D Spending {year}")
-        if success:
+        if download_dataset_year("part_d", year, dest, catalog):
             downloaded.append(dest)
 
     return downloaded
 
 
-def download_provider_utilization(data_dir: Path, years: list[int]) -> list[Path]:
+def download_provider_utilization(
+    data_dir: Path,
+    years: list[int],
+    catalog: list[dict],
+) -> list[Path]:
     """Download Medicare Physician and Other Practitioners utilization data."""
     downloaded = []
     for year in years:
@@ -181,13 +356,7 @@ def download_provider_utilization(data_dir: Path, years: list[int]) -> list[Path
             downloaded.append(dest)
             continue
 
-        url = PROVIDER_UTIL_CSV_URLS.get(year)
-        if not url:
-            log.warning(f"[Provider Util {year}] No URL configured for year {year} — skipping")
-            continue
-
-        success = download_file(url, dest, description=f"Provider Utilization {year}")
-        if success:
+        if download_dataset_year("provider_util", year, dest, catalog):
             downloaded.append(dest)
 
     return downloaded
@@ -222,31 +391,66 @@ def check_nppes_file(data_dir: Path) -> None:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Download CMS datasets into data/raw/")
+    parser.add_argument(
+        "--years",
+        default=",".join(str(y) for y in CMS_YEARS),
+        help="Comma-separated years, e.g. 2023 or 2021,2022,2023",
+    )
+    parser.add_argument(
+        "--only",
+        choices=["part-d", "provider-util", "all"],
+        default="all",
+        help="Download only one dataset family",
+    )
+    parser.add_argument(
+        "--list-urls",
+        action="store_true",
+        help="Print resolved download URLs and exit (no download)",
+    )
+    return parser
+
+
 def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+    years = [int(y.strip()) for y in args.years.split(",") if y.strip()]
+
     log.info("=" * 60)
     log.info("Medicare Claim Denial Platform — CMS Data Downloader")
     log.info(f"Target directory : {DATA_DIR.resolve()}")
-    log.info(f"Years            : {CMS_YEARS}")
+    log.info(f"Years            : {years}")
     log.info("=" * 60)
+
+    datasets = ["part_d", "provider_util"]
+    if args.only == "part-d":
+        datasets = ["part_d"]
+    elif args.only == "provider-util":
+        datasets = ["provider_util"]
+
+    if args.list_urls:
+        list_download_urls(years, datasets)
+        return
 
     ensure_data_dir(DATA_DIR)
 
-    # Connectivity check
     available = check_cms_availability()
     if not available:
-        log.warning("CMS API may be unreachable — downloads may fail. Continuing anyway.")
+        log.warning("CMS catalog may be unreachable — downloads may fail. Continuing anyway.")
 
-    results = {}
+    catalog = load_cms_catalog()
+    results: dict[str, int] = {}
 
-    # Part D spending
-    log.info("\n── Downloading Medicare Part D Spending ─────────────────────")
-    part_d_files = download_part_d_data(DATA_DIR, CMS_YEARS)
-    results["part_d"] = len(part_d_files)
+    if "part_d" in datasets:
+        log.info("\n── Downloading Medicare Part D Spending ─────────────────────")
+        part_d_files = download_part_d_data(DATA_DIR, years, catalog)
+        results["part_d"] = len(part_d_files)
 
-    # Provider utilization
-    log.info("\n── Downloading Medicare Provider Utilization ────────────────")
-    util_files = download_provider_utilization(DATA_DIR, CMS_YEARS)
-    results["provider_utilization"] = len(util_files)
+    if "provider_util" in datasets:
+        log.info("\n── Downloading Medicare Provider Utilization ────────────────")
+        util_files = download_provider_utilization(DATA_DIR, years, catalog)
+        results["provider_utilization"] = len(util_files)
 
     # NPPES (manual)
     log.info("\n── Checking NPPES NPI Registry ──────────────────────────────")
@@ -255,13 +459,13 @@ def main() -> None:
     # Summary
     log.info("\n" + "=" * 60)
     log.info("Download Summary:")
-    log.info(f"  Part D files downloaded     : {results['part_d']}")
-    log.info(f"  Provider util files         : {results['provider_utilization']}")
+    log.info(f"  Part D files downloaded     : {results.get('part_d', 0)}")
+    log.info(f"  Provider util files         : {results.get('provider_utilization', 0)}")
     log.info(f"  Target directory            : {DATA_DIR.resolve()}")
     log.info("=" * 60)
 
-    if results["part_d"] == 0 and results["provider_utilization"] == 0:
-        log.error("No files were downloaded. Check network connectivity and URLs.")
+    if sum(results.values()) == 0:
+        log.error("No files were downloaded. Try: python ingestion/scripts/download_cms_data.py --list-urls --years 2023")
         sys.exit(1)
 
     log.info("Done. Next step: run ingestion/scripts/load_to_postgres.py")

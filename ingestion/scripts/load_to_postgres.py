@@ -62,7 +62,12 @@ log = logging.getLogger(__name__)
 # ── Configuration ─────────────────────────────────────────────────────────────
 DATA_DIR = Path(os.environ.get("DATA_DIR", "data/raw"))
 RAW_SCHEMA = "raw"
-CHUNK_SIZE = 50_000
+# Default chunk sizes (overridden for wide files like NPPES)
+DEFAULT_READ_CHUNK = 50_000
+DEFAULT_SQL_CHUNK = 2_000
+# NPPES has 300+ columns — small batches avoid MemoryError in SQLAlchemy
+NPPES_READ_CHUNK = 2_000
+NPPES_SQL_CHUNK = 250
 
 PG_USER = os.environ.get("POSTGRES_USER", "denial_user")
 PG_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "")
@@ -202,11 +207,63 @@ def resolve_csv_files(
 
 # ── Load helpers ──────────────────────────────────────────────────────────────
 
+def get_chunk_settings(csv_path: Path) -> tuple[int, int]:
+    """
+    Return (read_chunk_size, sql_insert_chunk_size) for a CSV file.
+    Wide files (NPPES) use smaller batches to prevent MemoryError.
+    """
+    stem = csv_path.stem.lower()
+    if "nppes" in stem:
+        return NPPES_READ_CHUNK, NPPES_SQL_CHUNK
+    return DEFAULT_READ_CHUNK, DEFAULT_SQL_CHUNK
+
+
+def _make_row_skipper(rows_to_skip: int):
+    """
+    pandas skiprows callable: keep header (row 0), skip the next N data rows.
+    Faster than reading and discarding millions of rows when resuming.
+    """
+    remaining = rows_to_skip
+
+    def skip(row_idx: int) -> bool:
+        nonlocal remaining
+        if row_idx == 0:
+            return False
+        if remaining > 0:
+            remaining -= 1
+            return True
+        return False
+
+    return skip
+
+
+def iter_csv_chunks(
+    csv_path: Path,
+    read_chunk: int,
+    skip_rows: int = 0,
+):
+    """Yield DataFrame chunks from a CSV, optionally skipping leading data rows."""
+    read_kwargs = dict(
+        chunksize=read_chunk,
+        low_memory=False,
+        dtype=str,
+        na_values=["", "NA", "N/A", "NULL", "null", "None"],
+        keep_default_na=True,
+    )
+    if skip_rows > 0:
+        log.info(f"  Fast-forwarding past {skip_rows:,} already-loaded rows in CSV...")
+        read_kwargs["skiprows"] = _make_row_skipper(skip_rows)
+
+    yield from pd.read_csv(csv_path, **read_kwargs)
+
+
 def load_csv_to_postgres(
     csv_path: Path,
     engine: Engine,
     if_exists: str = "replace",
     skip_rows: int = 0,
+    read_chunk: Optional[int] = None,
+    sql_chunk: Optional[int] = None,
 ) -> int:
     """
     Load a CSV into PostgreSQL using chunked pandas read + to_sql.
@@ -225,34 +282,20 @@ def load_csv_to_postgres(
     year = extract_year_from_stem(file_stem)
     loaded_at = datetime.now(timezone.utc)
 
+    default_read, default_sql = get_chunk_settings(csv_path)
+    read_chunk = read_chunk or default_read
+    sql_chunk = sql_chunk or default_sql
+
     log.info(
         f"Loading: {csv_path.name}  →  {RAW_SCHEMA}.{table_name}  "
-        f"(if_exists='{if_exists}', skip_rows={skip_rows:,})"
+        f"(if_exists='{if_exists}', skip_rows={skip_rows:,}, "
+        f"read_chunk={read_chunk:,}, sql_chunk={sql_chunk:,})"
     )
 
     rows_written = 0
-    rows_remaining_to_skip = skip_rows
     first_chunk = True
 
-    for chunk_df in pd.read_csv(
-        csv_path,
-        chunksize=CHUNK_SIZE,
-        low_memory=False,
-        dtype=str,
-        na_values=["", "NA", "N/A", "NULL", "null", "None"],
-        keep_default_na=True,
-    ):
-        if rows_remaining_to_skip > 0:
-            if rows_remaining_to_skip >= len(chunk_df):
-                rows_remaining_to_skip -= len(chunk_df)
-                log.info(
-                    f"  ... skipping {len(chunk_df):,} already-loaded rows "
-                    f"({skip_rows - rows_remaining_to_skip:,}/{skip_rows:,})"
-                )
-                continue
-            chunk_df = chunk_df.iloc[rows_remaining_to_skip:]
-            rows_remaining_to_skip = 0
-
+    for chunk_df in iter_csv_chunks(csv_path, read_chunk, skip_rows=skip_rows):
         chunk_df.columns = [
             re.sub(r"\s+", "_", col.strip().lower()) for col in chunk_df.columns
         ]
@@ -261,13 +304,15 @@ def load_csv_to_postgres(
             chunk_df["year"] = str(year)
 
         write_mode = if_exists if first_chunk else "append"
+        # Use small chunksize + default insert method (not "multi") to avoid
+        # MemoryError when compiling huge multi-row INSERTs for wide NPPES files.
         chunk_df.to_sql(
             name=table_name,
             con=engine,
             schema=RAW_SCHEMA,
             if_exists=write_mode,
             index=False,
-            method="multi",
+            chunksize=sql_chunk,
         )
 
         rows_written += len(chunk_df)
@@ -376,7 +421,12 @@ def append_new_year_file(
     return load_csv_to_postgres(csv_path, engine, if_exists=if_exists, skip_rows=0)
 
 
-def resume_file_load(csv_path: Path, engine: Engine) -> int:
+def resume_file_load(
+    csv_path: Path,
+    engine: Engine,
+    read_chunk: Optional[int] = None,
+    sql_chunk: Optional[int] = None,
+) -> int:
     """
     Resume loading a single CSV:
       - skip if already complete
@@ -405,6 +455,8 @@ def resume_file_load(csv_path: Path, engine: Engine) -> int:
         engine,
         if_exists=if_exists,
         skip_rows=skip_rows,
+        read_chunk=read_chunk,
+        sql_chunk=sql_chunk,
     )
 
 
@@ -412,6 +464,8 @@ def resume_remaining_loads(
     engine: Engine,
     data_dir: Path = DATA_DIR,
     only_files: Optional[list[str]] = None,
+    read_chunk: Optional[int] = None,
+    sql_chunk: Optional[int] = None,
 ) -> dict[str, int]:
     """
     Resume all incomplete CSV loads in data_dir.
@@ -427,7 +481,9 @@ def resume_remaining_loads(
 
     for csv_path in csv_files:
         try:
-            rows = resume_file_load(csv_path, engine)
+            rows = resume_file_load(
+                csv_path, engine, read_chunk=read_chunk, sql_chunk=sql_chunk
+            )
             table_name = resolve_canonical_table(csv_path.stem)
             summary[table_name] = summary.get(table_name, 0) + rows
         except Exception as exc:
@@ -551,6 +607,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=f"Directory containing CSV files (default: {DATA_DIR})",
     )
+    parser.add_argument(
+        "--read-chunk",
+        type=int,
+        default=None,
+        help="CSV rows read per pandas chunk (default: auto, 2000 for NPPES)",
+    )
+    parser.add_argument(
+        "--sql-chunk",
+        type=int,
+        default=None,
+        help="Rows per INSERT batch (default: auto, 250 for NPPES)",
+    )
     return parser
 
 
@@ -605,7 +673,13 @@ def main() -> None:
 
     if args.resume:
         log.info("Mode: RESUME (skip complete files, continue partial loads)")
-        summary = resume_remaining_loads(engine, data_dir, args.only)
+        summary = resume_remaining_loads(
+            engine,
+            data_dir,
+            args.only,
+            read_chunk=args.read_chunk,
+            sql_chunk=args.sql_chunk,
+        )
     else:
         log.info("Mode: FULL LOAD (first file per table uses replace)")
         summary = run_full_load(engine, data_dir, args.only)

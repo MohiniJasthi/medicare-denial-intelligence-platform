@@ -1,0 +1,32 @@
+version: 2
+
+models:
+  - name: int_providers
+    description: Canonical provider records from NPPES with display names.
+    columns:
+      - name: npi
+        tests:
+          - unique
+          - not_null
+
+  - name: int_utilization_enriched
+    description: Utilization facts left-joined to NPPES provider attributes.
+    columns:
+      - name: utilization_id
+        tests:
+          - unique
+          - not_null
+      - name: npi
+        tests:
+          - not_null
+
+  - name: int_spending_enriched
+    description: Part D spending facts left-joined to NPPES provider attributes.
+    columns:
+      - name: spending_id
+        tests:
+          - unique
+          - not_null
+      - name: npi
+        tests:
+          - not_null

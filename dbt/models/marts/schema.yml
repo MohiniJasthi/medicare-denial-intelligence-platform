@@ -1,0 +1,44 @@
+version: 2
+
+models:
+  - name: dim_providers
+    description: Provider dimension mart — one row per NPI.
+    columns:
+      - name: npi
+        tests:
+          - unique
+          - not_null
+      - name: display_name
+        tests:
+          - not_null
+
+  - name: fct_provider_spending
+    description: Part D spending facts at provider × drug × year grain.
+    columns:
+      - name: spending_id
+        tests:
+          - unique
+          - not_null
+      - name: npi
+        tests:
+          - not_null
+      - name: total_drug_cost
+        description: Total Medicare Part D drug cost in USD
+
+  - name: fct_utilization_by_specialty
+    description: >
+      Specialty-level benchmarks for utilization volume and implied withhold
+      (denial proxy) rates by state and year.
+    columns:
+      - name: specialty_benchmark_id
+        tests:
+          - unique
+          - not_null
+      - name: specialty
+        tests:
+          - not_null
+      - name: year
+        tests:
+          - not_null
+      - name: avg_withhold_rate
+        description: Average implied payment withhold rate for the specialty cohort

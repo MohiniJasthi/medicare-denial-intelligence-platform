@@ -153,8 +153,8 @@ denial-platform/
 │   │   │   ├── stg_cms_part_d_spending.sql
 │   │   │   ├── stg_cms_provider_utilization.sql
 │   │   │   └── stg_nppes_providers.sql
-│   │   ├── intermediate/           # Business logic joins (coming soon)
-│   │   └── marts/                  # Analytical fact/dim tables (coming soon)
+│   │   ├── intermediate/           # Enriched provider, spending, utilization joins
+│   │   └── marts/                  # dim_providers, fct_provider_spending, fct_utilization_by_specialty
 │   ├── tests/                      # Custom singular tests
 │   ├── seeds/                      # Static reference data (ICD-10, taxonomy)
 │   └── macros/                     # Reusable SQL macros
@@ -171,9 +171,12 @@ denial-platform/
 │   └── raw/                        # Downloaded CMS CSV files (gitignored)
 │
 ├── notebooks/                      # EDA and model development
-├── ml/                             # ML pipeline: denial classifier + SHAP
-├── streamlit/                      # Interactive analytics dashboard
-│   └── app.py
+│   └── 01_marts_eda.ipynb          # Exploratory analysis on dbt marts
+├── ml/                             # ML pipeline: denial classifier + SHAP (coming soon)
+├── streamlit/                      # Multi-page analytics dashboard
+│   ├── app.py
+│   ├── db.py
+│   └── pages/                      # Specialty benchmarks, drug spending, provider lookup
 └── .gitignore
 ```
 
@@ -200,13 +203,14 @@ This project demonstrates the following SQL and dbt techniques:
 
 ## Roadmap
 
-- [ ] Intermediate models: provider dimension, HCPCS lookup, specialty benchmarks
-- [ ] Marts: `fct_provider_spending`, `fct_utilization_by_specialty`, `dim_providers`
+- [x] Intermediate models: provider enrichment, spending & utilization joins
+- [x] Marts: `fct_provider_spending`, `fct_utilization_by_specialty`, `dim_providers`
+- [x] Streamlit multi-page dashboard
+- [x] EDA notebook on marts (`notebooks/01_marts_eda.ipynb`)
 - [ ] Great Expectations data quality suite
 - [ ] XGBoost denial prediction model + MLflow tracking
 - [ ] SHAP feature importance dashboard
 - [ ] HuggingFace appeal letter generator
-- [ ] Streamlit multi-page dashboard
 
 ---
 

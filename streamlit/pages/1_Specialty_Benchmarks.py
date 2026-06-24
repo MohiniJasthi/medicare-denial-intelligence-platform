@@ -42,30 +42,37 @@ with col2:
 with col3:
   top_n = st.slider("Top N specialties", 5, 25, 15)
 
-params = {"year": int(year)}
-state_filter = ""
-if state != "All":
-  state_filter = "AND state = :state"
-  params["state"] = state
 
-df = run_query(
-  f"""
-  SELECT
-    specialty,
-    state,
-    year,
-    provider_count,
-    total_services,
-    avg_withhold_rate,
-    median_withhold_rate
-  FROM public_marts.fct_utilization_by_specialty
-  WHERE year = :year
-    {state_filter}
-  ORDER BY avg_withhold_rate DESC
-  LIMIT :limit
-  """,
-  {**params, "limit": top_n},
-)
+@st.cache_data(ttl=600)
+def load_specialty_benchmarks(year_value: int, state_value: str | None, limit: int):
+  params = {"year": year_value, "limit": limit}
+  state_filter = ""
+  if state_value:
+    state_filter = "AND state = :state"
+    params["state"] = state_value
+
+  return run_query(
+    f"""
+    SELECT
+      specialty,
+      state,
+      year,
+      provider_count,
+      total_services,
+      avg_withhold_rate,
+      median_withhold_rate
+    FROM public_marts.fct_utilization_by_specialty
+    WHERE year = :year
+      {state_filter}
+    ORDER BY avg_withhold_rate DESC
+    LIMIT :limit
+    """,
+    params,
+  )
+
+
+params_state = None if state == "All" else state
+df = load_specialty_benchmarks(int(year), params_state, top_n)
 
 if df.empty:
   st.info("No data for the selected filters.")

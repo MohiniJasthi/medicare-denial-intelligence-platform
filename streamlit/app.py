@@ -7,7 +7,7 @@ Run from project root:
 
 import streamlit as st
 
-from db import intermediate_ready, marts_ready, run_query
+from db import intermediate_ready, marts_ready, approx_row_count, run_query
 
 st.set_page_config(
   page_title="Medicare Denial Intelligence",
@@ -15,6 +15,34 @@ st.set_page_config(
   layout="wide",
   initial_sidebar_state="expanded",
 )
+
+
+@st.cache_data(ttl=600)
+def load_kpis() -> dict:
+  """Load overview metrics with queries tuned for large tables."""
+  if marts_ready():
+    providers = approx_row_count("public_marts", "dim_providers")
+    spending_rows = approx_row_count("public_marts", "fct_provider_spending")
+    avg_withhold = run_query(
+      """
+      SELECT ROUND(AVG(avg_withhold_rate)::numeric, 4) AS rate
+      FROM public_marts.fct_utilization_by_specialty
+      """
+    ).iloc[0, 0]
+  else:
+    providers = approx_row_count("public_intermediate", "int_providers")
+    spending_rows = approx_row_count("raw", "cms_part_d_spending")
+    avg_withhold = None
+
+  utilization_rows = approx_row_count("raw", "cms_provider_utilization")
+
+  return {
+    "providers": providers,
+    "utilization_rows": utilization_rows,
+    "spending_rows": spending_rows,
+    "avg_withhold": avg_withhold,
+  }
+
 
 st.title("Medicare Claim Denial Intelligence Platform")
 st.caption(
@@ -44,46 +72,20 @@ if not marts_ready():
 col1, col2, col3, col4 = st.columns(4)
 
 try:
-  providers = run_query(
-    "SELECT COUNT(*) AS n FROM public_marts.dim_providers"
-    if marts_ready()
-    else "SELECT COUNT(*) AS n FROM public_intermediate.int_providers"
-  ).iloc[0, 0]
+  with st.spinner("Loading KPIs (first load may take a minute)..."):
+    kpis = load_kpis()
 
-  utilization_rows = run_query(
-    "SELECT COUNT(*) AS n FROM public_intermediate.int_utilization_enriched"
-  ).iloc[0, 0]
-
-  spending_rows = run_query(
-    "SELECT COUNT(*) AS n FROM public_marts.fct_provider_spending"
-    if marts_ready()
-    else "SELECT COUNT(*) AS n FROM public_intermediate.int_spending_enriched"
-  ).iloc[0, 0]
-
-  if marts_ready():
-    avg_withhold = run_query(
-      """
-      SELECT ROUND(AVG(avg_withhold_rate)::numeric, 4) AS rate
-      FROM public_marts.fct_utilization_by_specialty
-      """
-    ).iloc[0, 0]
-  else:
-    avg_withhold = run_query(
-      """
-      SELECT ROUND(AVG(implied_withhold_rate)::numeric, 4) AS rate
-      FROM public_intermediate.int_utilization_enriched
-      WHERE implied_withhold_rate IS NOT NULL
-      """
-    ).iloc[0, 0]
-
-  col1.metric("Providers", f"{int(providers):,}")
-  col2.metric("Utilization rows", f"{int(utilization_rows):,}")
-  col3.metric("Spending rows", f"{int(spending_rows):,}")
-  col4.metric("Avg withhold rate", f"{avg_withhold:.2%}" if avg_withhold else "—")
+  col1.metric("Providers", f"{kpis['providers']:,}")
+  col2.metric("Utilization rows", f"{kpis['utilization_rows']:,}")
+  col3.metric("Spending rows", f"{kpis['spending_rows']:,}")
+  rate = kpis["avg_withhold"]
+  col4.metric("Avg withhold rate", f"{rate:.2%}" if rate is not None else "—")
 
 except Exception as exc:
   st.error(f"Could not load KPIs: {exc}")
-  st.info("Check Docker is running and `.env` has POSTGRES_HOST=localhost")
+  st.info("Check PostgreSQL is running and `.env` has POSTGRES_HOST=localhost")
+
+st.caption("Row counts are approximate Postgres statistics for fast loading.")
 
 st.divider()
 st.subheader("Pipeline status")

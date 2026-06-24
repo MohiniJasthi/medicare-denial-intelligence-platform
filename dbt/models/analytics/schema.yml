@@ -1,0 +1,58 @@
+version: 2
+
+models:
+  - name: anl_kpi_overview
+    description: Single-row KPI snapshot for executive dashboard cards.
+    columns:
+      - name: provider_count
+        tests:
+          - not_null
+
+  - name: anl_withhold_national
+    description: National specialty withhold benchmarks by year.
+    columns:
+      - name: specialty
+        tests:
+          - not_null
+      - name: year
+        tests:
+          - not_null
+
+  - name: anl_withhold_by_state
+    description: State-level withhold benchmarks by year for geographic analysis.
+    columns:
+      - name: state
+        tests:
+          - not_null
+      - name: year
+        tests:
+          - not_null
+
+  - name: anl_withhold_yoy
+    description: Year-over-year withhold rate change by specialty (2023 vs 2024).
+    columns:
+      - name: specialty
+        tests:
+          - unique
+          - not_null
+
+  - name: anl_drug_spending
+    description: Drug-level Part D spending aggregates by year.
+    columns:
+      - name: drug_name
+        tests:
+          - not_null
+      - name: year
+        tests:
+          - not_null
+
+  - name: anl_provider_withhold_risk
+    description: Provider-level withhold risk bands vs specialty median.
+    columns:
+      - name: provider_risk_id
+        tests:
+          - unique
+          - not_null
+      - name: npi
+        tests:
+          - not_null

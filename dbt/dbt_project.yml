@@ -29,6 +29,9 @@ models:
     marts:
       +materialized: table
       +schema: marts
+    analytics:
+      +materialized: table
+      +schema: analytics
 
 # ── Seeds Configuration ───────────────────────────────────────
 seeds:

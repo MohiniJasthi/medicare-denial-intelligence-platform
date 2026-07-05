@@ -170,8 +170,16 @@ denial-platform/
 ├── data/
 │   └── raw/                        # Downloaded CMS CSV files (gitignored)
 │
+├── analytics/                      # BI-ready datasets + Power BI guide
+│   ├── README.md
+│   ├── grant_analytics_schema.sql
+│   └── powerbi/
+│       ├── POWERBI_SETUP.md
+│       └── DAX_MEASURES.md
+│
 ├── notebooks/                      # EDA and model development
-│   └── 01_marts_eda.ipynb          # Exploratory analysis on dbt marts
+│   ├── 01_marts_eda.ipynb          # Exploratory analysis on dbt marts
+│   └── 02_analytics_deep_dive.ipynb
 ├── ml/                             # ML pipeline: denial classifier + SHAP (coming soon)
 ├── streamlit/                      # Multi-page analytics dashboard
 │   ├── app.py
@@ -207,9 +215,13 @@ This project demonstrates the following SQL and dbt techniques:
 - [x] Marts: `fct_provider_spending`, `fct_utilization_by_specialty`, `dim_providers`
 - [x] Streamlit multi-page dashboard
 - [x] EDA notebook on marts (`notebooks/01_marts_eda.ipynb`)
-- [ ] Great Expectations data quality suite
-- [ ] XGBoost denial prediction model + MLflow tracking
-- [ ] SHAP feature importance dashboard
+- [x] Analytics layer for BI (`dbt/models/analytics/`)
+- [x] Analytics deep-dive notebook (`notebooks/02_analytics_deep_dive.ipynb`)
+- [x] Power BI setup guide (`analytics/powerbi/POWERBI_SETUP.md`)
+- [x] XGBoost withhold-risk classifier (`ml/train_withhold_classifier.py`)
+- [x] Raw data quality validation (`data_quality/validate_raw.py`)
+- [x] Streamlit ML insights page
+- [ ] README portfolio screenshots (Streamlit + Power BI)
 - [ ] HuggingFace appeal letter generator
 
 ---

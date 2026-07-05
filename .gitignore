@@ -57,6 +57,15 @@ logs/
 *.joblib
 *.model
 ml/models/
+ml/artifacts/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Power BI (local reports may be large)
+*.pbix
+*.pbip
+analytics/powerbi/csv/
+
+# Private personal notes (not for GitHub)
+private/

@@ -19,9 +19,12 @@ CREATE SCHEMA IF NOT EXISTS marts;
 -- ML feature store
 CREATE SCHEMA IF NOT EXISTS features;
 
+-- Analytics / BI layer (dbt + Power BI)
+CREATE SCHEMA IF NOT EXISTS analytics;
+
 -- Grant usage to the application user
-GRANT USAGE ON SCHEMA raw, staging, intermediate, marts, features
+GRANT USAGE ON SCHEMA raw, staging, intermediate, marts, features, analytics
     TO denial_user;
 
-GRANT CREATE ON SCHEMA raw, staging, intermediate, marts, features
+GRANT CREATE ON SCHEMA raw, staging, intermediate, marts, features, analytics
     TO denial_user;

@@ -66,6 +66,7 @@ ml/artifacts/
 *.pbix
 *.pbip
 analytics/powerbi/csv/
+airflow_logs/
 
 # Private personal notes (not for GitHub)
 private/

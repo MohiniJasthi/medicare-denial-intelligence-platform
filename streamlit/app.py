@@ -83,7 +83,10 @@ try:
 
 except Exception as exc:
   st.error(f"Could not load KPIs: {exc}")
-  st.info("Check PostgreSQL is running and `.env` has POSTGRES_HOST=localhost")
+  st.info(
+    "Local: check PostgreSQL is running and `.env` has POSTGRES_HOST=localhost. "
+    "Streamlit Cloud: add database secrets — see `streamlit/DEPLOY.md`."
+  )
 
 st.caption("Row counts are approximate Postgres statistics for fast loading.")
 

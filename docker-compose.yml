@@ -26,12 +26,13 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__DEFAULT_TIMEZONE: UTC
     # Python path for custom modules
     PYTHONPATH: /opt/airflow
+    # App Postgres on Windows/Mac host (native install)
+    POSTGRES_HOST: host.docker.internal
+    PROJECT_ROOT: /opt/airflow/project
   volumes:
-    - airflow_dags:/opt/airflow/dags
-    - airflow_logs:/opt/airflow/logs
-    - ./ingestion:/opt/airflow/ingestion
-    - ./dbt:/opt/airflow/dbt
-    - ./data:/opt/airflow/data
+    - ./ingestion/flows:/opt/airflow/dags
+    - ./airflow_logs:/opt/airflow/logs
+    - .:/opt/airflow/project
   depends_on:
     postgres:
       condition: service_healthy

@@ -7,7 +7,6 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from db import marts_ready
 
 st.set_page_config(page_title="ML Insights", layout="wide")
 st.title("ML — Withhold Risk Classifier")
@@ -18,10 +17,6 @@ METRICS_FILE = ARTIFACTS / "metrics.json"
 SHAP_FILE = ARTIFACTS / "shap_summary.png"
 REPORT_FILE = ARTIFACTS / "classification_report.txt"
 MODEL_FILE = ARTIFACTS / "withhold_classifier.joblib"
-
-if not marts_ready():
-    st.warning("Build marts and analytics first: `dbt run --select analytics`")
-    st.stop()
 
 st.markdown(
     """

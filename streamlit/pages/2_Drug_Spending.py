@@ -7,50 +7,58 @@ import plotly.express as px
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from db import marts_ready, run_query
+from db import analytics_ready, marts_ready, run_query
 
 st.set_page_config(page_title="Drug Spending", layout="wide")
 st.title("Part D Drug Spending")
 st.caption("Medicare Part D prescribing costs by drug and year")
 
-table = "public_marts.fct_provider_spending" if marts_ready() else "public_intermediate.int_spending_enriched"
+if not analytics_ready():
+  if marts_ready():
+    st.warning(
+      "Build the analytics layer for fast drug rankings: "
+      "`cd dbt && dbt run --select anl_drug_spending`"
+    )
+  else:
+    st.warning("Build marts first: `cd dbt && dbt run --select marts analytics`")
+  st.stop()
 
-# Avoid DISTINCT on multi-million-row fact tables (very slow).
 years = run_query(
   """
   SELECT DISTINCT year
-  FROM public_marts.fct_utilization_by_specialty
+  FROM public_analytics.anl_drug_spending
   WHERE year IS NOT NULL
   ORDER BY year
   """
-)["year"].tolist() if marts_ready() else [2023, 2024]
+)["year"].tolist()
 
 year = st.selectbox("Year", years, index=len(years) - 1 if years else 0)
 top_n = st.slider("Top N drugs", 10, 50, 20)
 
 
 @st.cache_data(ttl=600)
-def load_top_drugs(table_name: str, year_value: int, limit: int):
+def load_top_drugs(year_value: int, limit: int):
+  # anl_drug_spending is at drug × generic × year; roll up to drug for rankings
   return run_query(
-    f"""
+    """
     SELECT
       drug_name,
-      SUM(total_claim_count) AS total_claims,
-      SUM(total_drug_cost) AS total_cost,
-      COUNT(DISTINCT npi) AS prescriber_count
-    FROM {table_name}
+      SUM(total_claims)::bigint AS total_claims,
+      SUM(total_medicare_cost)::numeric AS total_cost,
+      SUM(prescriber_count)::bigint AS prescriber_count
+    FROM public_analytics.anl_drug_spending
     WHERE year = :year
       AND drug_name IS NOT NULL
     GROUP BY drug_name
     ORDER BY total_cost DESC
     LIMIT :limit
     """,
-    {"year": year_value, "limit": limit},
+    {"year": int(year_value), "limit": int(limit)},
   )
 
 
-with st.spinner("Aggregating drug spending (may take 1–2 minutes)..."):
-  df = load_top_drugs(table, int(year), top_n)
+with st.spinner("Loading top drugs..."):
+  df = load_top_drugs(int(year), top_n)
 
 if df.empty:
   st.info("No spending data for this year.")
@@ -71,7 +79,7 @@ with col1:
   st.plotly_chart(fig, use_container_width=True)
 
 with col2:
-  total = df["total_cost"].sum()
+  total = float(df["total_cost"].sum())
   st.metric("Top drugs combined cost", f"${total:,.0f}")
   st.metric("Drugs shown", len(df))
   st.dataframe(

@@ -132,6 +132,20 @@ streamlit run streamlit/app.py
 ```
 Access the dashboard at http://localhost:8501
 
+### 8 — Pipeline orchestration
+
+**Native Postgres on Windows (recommended):** use the CLI or Prefect — no Docker required.
+
+```powershell
+# One-time: create ops.pipeline_runs
+& "E:\PostgreSQL\16\bin\psql.exe" -U denial_user -d denial_db -f ingestion\sql\ops_schema.sql
+
+# dbt refresh (default): validate → dbt run → dbt test
+python ingestion/run_pipeline.py
+```
+
+See **[orchestration/README.md](orchestration/README.md)** for Prefect, Airflow DAGs, and full re-ingestion flags.
+
 ---
 
 ## Project Structure
@@ -160,12 +174,21 @@ denial-platform/
 │   └── macros/                     # Reusable SQL macros
 │
 ├── ingestion/
+│   ├── pipeline_runner.py          # Shared orchestration steps + ops logging
+│   ├── run_pipeline.py             # CLI entry point
 │   ├── scripts/
 │   │   ├── download_cms_data.py    # Downloads CMS CSVs with retry logic
 │   │   ├── load_to_postgres.py     # Chunked CSV → PostgreSQL loader
 │   │   └── init_schemas.sql        # Bootstrap SQL (raw/staging/marts schemas)
+│   ├── sql/
+│   │   └── ops_schema.sql          # ops.pipeline_runs table
 │   └── flows/
-│       └── ingest_flow.py          # Airflow DAG: cms_daily_ingest
+│       ├── ingest_flow.py          # Legacy Airflow DAG: cms_daily_ingest
+│       ├── prefect_pipeline.py     # Prefect flow
+│       └── medicare_full_pipeline_dag.py  # Airflow: full + dbt refresh DAGs
+│
+├── orchestration/
+│   └── README.md                   # CLI / Prefect / Airflow setup guide
 │
 ├── data/
 │   └── raw/                        # Downloaded CMS CSV files (gitignored)
@@ -219,6 +242,7 @@ This project demonstrates the following SQL and dbt techniques:
 - [x] Analytics deep-dive notebook (`notebooks/02_analytics_deep_dive.ipynb`)
 - [x] Power BI setup guide (`analytics/powerbi/POWERBI_SETUP.md`)
 - [x] XGBoost withhold-risk classifier (`ml/train_withhold_classifier.py`)
+- [x] Pipeline orchestration (CLI + Prefect + Airflow DAGs)
 - [x] Raw data quality validation (`data_quality/validate_raw.py`)
 - [x] Streamlit ML insights page
 - [ ] README portfolio screenshots (Streamlit + Power BI)

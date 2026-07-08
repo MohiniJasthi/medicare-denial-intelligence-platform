@@ -7,6 +7,7 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from db import environment_label
 
 st.set_page_config(page_title="ML Insights", layout="wide")
 st.title("ML — Withhold Risk Classifier")
@@ -37,8 +38,8 @@ if METRICS_FILE.exists():
     metrics = json.loads(METRICS_FILE.read_text(encoding="utf-8"))
 else:
     st.info(
-        "Running in demo mode on Streamlit Cloud: local training artifacts are not "
-        "packaged with deployment."
+        f"Running in **demo mode** on {environment_label()}: training artifacts live in `ml/artifacts/` "
+        "and are not deployed by default."
     )
     st.code(
         """
@@ -87,9 +88,9 @@ st.markdown(
 with st.expander("How to interpret results"):
     st.markdown(
         """
-        - **ROC-AUC > 0.7** — reasonable discrimination for a portfolio baseline
-        - **High recall on High class** — catches more at-risk providers (may trade off precision)
-        - **Top SHAP features** — often `specialty_median_withhold`, `total_services`, `cms_specialty`
-        - This is a **proxy model** on public CMS data — not a production clinical billing model
+        - **What the model predicts**: whether a provider-year is **high-risk** relative to its specialty baseline.
+        - **Why AUC matters**: **ROC-AUC ~0.74** indicates meaningful ranking power for a proxy-label problem.
+        - **How to use it**: treat outputs as a **triage signal** (who to review first), not a denial verdict.
+        - **Key limitation**: labels are derived from payment gaps in public CMS data; true denial reasons are not available.
         """
     )

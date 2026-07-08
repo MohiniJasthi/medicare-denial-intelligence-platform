@@ -61,6 +61,54 @@ python streamlit/push_to_neon.py --dry-run               # preview only
 
 ---
 
+## Part B2 — Load the *full* dataset into Neon (advanced)
+
+You *can* load everything (raw + marts + analytics) into Neon, but be aware:
+
+- **Size**: the project contains **84M+ raw rows**. This usually exceeds free-tier storage.
+- **Cost / performance**: full loads take hours and can be expensive depending on your Neon plan.
+- **Recommendation**: for Streamlit Community Cloud, the best “portfolio deployment” is:
+  - **`public_analytics`** (all 6 `anl_*` tables) + **`public_marts.fct_utilization_by_specialty`**
+  - optional: sampled `dim_providers` + sampled `int_utilization_enriched`
+
+If you *still* want a full load, prefer **Postgres-native backups** over pandas `to_sql`.
+
+### Option 1 — `pg_dump` / `pg_restore` (recommended for full load)
+
+1. Install Postgres client tools (you already have `E:\PostgreSQL\16\bin\pg_dump.exe`).
+2. Set your Neon password in the shell when prompted (do not paste it into git).
+
+**Dump locally (custom format):**
+
+```powershell
+cd E:\projects\healthcare\denial-platform
+
+# dump everything you want (raw can be huge)
+& "E:\PostgreSQL\16\bin\pg_dump.exe" -h localhost -U denial_user -d denial_db -F c -f denial_db.dump
+```
+
+**Restore to Neon:**
+
+```powershell
+$env:PGPASSWORD = "YOUR_NEON_PASSWORD"
+$neonHost = "ep-xxxx.us-east-2.aws.neon.tech"
+$neonDb = "neondb"
+$neonUser = "neondb_owner"
+
+& "E:\PostgreSQL\16\bin\pg_restore.exe" -h $neonHost -U $neonUser -d $neonDb -Fc -c --if-exists denial_db.dump
+```
+
+Notes:
+- `-c --if-exists` drops existing objects before restoring.
+- If you only want the **analytics** layer (fast), dump just that schema:
+
+```powershell
+& "E:\PostgreSQL\16\bin\pg_dump.exe" -h localhost -U denial_user -d denial_db -n public_analytics -F c -f analytics.dump
+& "E:\PostgreSQL\16\bin\pg_restore.exe" -h $neonHost -U $neonUser -d $neonDb -Fc -c --if-exists analytics.dump
+```
+
+---
+
 ## Part C — Deploy on Streamlit Community Cloud
 
 1. Push latest code to GitHub (`.env` must **not** be in the repo)

@@ -9,6 +9,7 @@ import streamlit as st
 
 from db import (
   approx_row_count,
+  get_postgres_config,
   intermediate_ready,
   marts_ready,
   run_query,
@@ -76,8 +77,11 @@ st.caption(
 
 st.markdown(
   """
-  This dashboard surfaces **implied withhold rates** from Medicare utilization data —
-  a transparent proxy for payment gaps that may reflect denials or adjustments.
+  I built this platform to translate public CMS data into **denial-adjacent payment intelligence**.
+
+  - **Core proxy metric**: implied withhold rate \( \(1 - \frac{\text{Medicare payment}}{\text{allowed amount}}\) \)
+  - **Why it matters**: helps prioritize specialties, regions, and providers where payment gaps are consistently elevated
+  - **Important limitation**: this is a **proxy** on public data — it is not a labeled claims-denial dataset
   """
 )
 
@@ -126,6 +130,35 @@ layers = [
 ]
 for col, (name, ok) in zip(status, layers):
   col.metric(name, "Ready" if ok else "Pending")
+
+with st.expander("Data coverage (cloud vs local)"):
+  cfg = get_postgres_config()
+  st.write(
+    {
+      "db_host": cfg.get("host"),
+      "db_name": cfg.get("database"),
+      "schemas_found": {
+        "public_analytics": any(
+          table_exists("public_analytics", t) for t in ["anl_kpi_overview", "anl_drug_spending"]
+        ),
+        "public_marts": any(
+          table_exists("public_marts", t) for t in ["fct_utilization_by_specialty", "dim_providers"]
+        ),
+        "public_intermediate": any(
+          table_exists("public_intermediate", t) for t in ["int_utilization_enriched"]
+        ),
+        "raw": any(
+          table_exists("raw", t) for t in ["cms_provider_utilization", "cms_part_d_spending"]
+        ),
+      },
+    }
+  )
+  st.markdown(
+    """
+    **Tip:** On Streamlit Community Cloud, the database is usually **Neon** and the dataset is often **sampled** to fit free-tier storage.
+    If you want full raw tables in the cloud, follow `streamlit/DEPLOY.md` → *Part B2*.
+    """
+  )
 
 st.divider()
 st.markdown(

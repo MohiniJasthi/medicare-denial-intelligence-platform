@@ -98,6 +98,17 @@ def postgres_configured() -> bool:
     return bool(get_postgres_config().get("password"))
 
 
+def environment_label() -> str:
+    """Lightweight label for UI badges."""
+    cfg = get_postgres_config()
+    host = (cfg.get("host") or "").lower()
+    if "neon.tech" in host:
+        return "cloud (Neon)"
+    if host in ("localhost", "127.0.0.1"):
+        return "local"
+    return "cloud"
+
+
 @st.cache_resource
 def get_engine() -> Engine:
     cfg = get_postgres_config()

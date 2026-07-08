@@ -110,22 +110,22 @@ def get_engine() -> Engine:
             "credentials (see streamlit/DEPLOY.md)."
         )
 
-  # NullPool: fresh connection per query — avoids stale pooled connections on reruns
-  connect_args: dict = {
-      "connect_timeout": 10,
-      "options": "-c statement_timeout=120000",  # 2 minutes per query
-  }
-  if "neon.tech" in cfg["host"] or os.getenv("POSTGRES_SSLMODE") == "require":
-      connect_args["sslmode"] = "require"
+    # NullPool: fresh connection per query — avoids stale pooled connections on reruns
+    connect_args: dict = {
+        "connect_timeout": 10,
+        "options": "-c statement_timeout=120000",  # 2 minutes per query
+    }
+    if "neon.tech" in cfg["host"] or os.getenv("POSTGRES_SSLMODE") == "require":
+        connect_args["sslmode"] = "require"
 
-  return create_engine(
-    (
-      f"postgresql+psycopg2://{cfg['user']}:{cfg['password']}"
-      f"@{cfg['host']}:{cfg['port']}/{cfg['database']}"
-    ),
-    poolclass=NullPool,
-    connect_args=connect_args,
-  )
+    return create_engine(
+        (
+            f"postgresql+psycopg2://{cfg['user']}:{cfg['password']}"
+            f"@{cfg['host']}:{cfg['port']}/{cfg['database']}"
+        ),
+        poolclass=NullPool,
+        connect_args=connect_args,
+    )
 
 
 def run_query(sql: str, params: dict | None = None) -> pd.DataFrame:

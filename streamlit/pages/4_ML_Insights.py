@@ -17,6 +17,12 @@ METRICS_FILE = ARTIFACTS / "metrics.json"
 SHAP_FILE = ARTIFACTS / "shap_summary.png"
 REPORT_FILE = ARTIFACTS / "classification_report.txt"
 MODEL_FILE = ARTIFACTS / "withhold_classifier.joblib"
+DEMO_METRICS = {
+    "roc_auc": 0.7418,
+    "train_year": 2023,
+    "test_year": 2024,
+    "test_rows": 640038,
+}
 
 st.markdown(
     """
@@ -27,8 +33,13 @@ st.markdown(
     """
 )
 
-if not METRICS_FILE.exists():
-    st.info("Model not trained yet. Run the command below, then refresh this page.")
+if METRICS_FILE.exists():
+    metrics = json.loads(METRICS_FILE.read_text(encoding="utf-8"))
+else:
+    st.info(
+        "Running in demo mode on Streamlit Cloud: local training artifacts are not "
+        "packaged with deployment."
+    )
     st.code(
         """
 cd E:\\projects\\healthcare\\denial-platform
@@ -38,13 +49,7 @@ python ml/train_withhold_classifier.py
         """.strip(),
         language="powershell",
     )
-    st.markdown(
-        "Training takes **15–30 minutes** (samples 300k rows by default). "
-        "Outputs saved to `ml/artifacts/`."
-    )
-    st.stop()
-
-metrics = json.loads(METRICS_FILE.read_text(encoding="utf-8"))
+    metrics = DEMO_METRICS
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("ROC-AUC", f"{metrics.get('roc_auc', 0):.3f}")

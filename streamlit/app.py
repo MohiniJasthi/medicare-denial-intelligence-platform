@@ -7,7 +7,13 @@ Run from project root:
 
 import streamlit as st
 
-from db import intermediate_ready, marts_ready, approx_row_count, run_query
+from db import (
+  approx_row_count,
+  intermediate_ready,
+  marts_ready,
+  run_query,
+  table_exists,
+)
 
 st.set_page_config(
   page_title="Medicare Denial Intelligence",
@@ -20,9 +26,32 @@ st.set_page_config(
 @st.cache_data(ttl=600)
 def load_kpis() -> dict:
   """Load overview metrics with queries tuned for large tables."""
-  if marts_ready():
+  if table_exists("public_marts", "dim_providers"):
     providers = approx_row_count("public_marts", "dim_providers")
+  elif table_exists("public_intermediate", "int_providers"):
+    providers = approx_row_count("public_intermediate", "int_providers")
+  else:
+    providers = 0
+
+  if table_exists("raw", "cms_provider_utilization"):
+    utilization_rows = approx_row_count("raw", "cms_provider_utilization")
+  elif table_exists("public_intermediate", "int_utilization_enriched"):
+    utilization_rows = approx_row_count("public_intermediate", "int_utilization_enriched")
+  elif table_exists("public_marts", "fct_utilization_by_specialty"):
+    utilization_rows = approx_row_count("public_marts", "fct_utilization_by_specialty")
+  else:
+    utilization_rows = 0
+
+  if table_exists("raw", "cms_part_d_spending"):
+    spending_rows = approx_row_count("raw", "cms_part_d_spending")
+  elif table_exists("public_marts", "fct_provider_spending"):
     spending_rows = approx_row_count("public_marts", "fct_provider_spending")
+  elif table_exists("public_analytics", "anl_drug_spending"):
+    spending_rows = approx_row_count("public_analytics", "anl_drug_spending")
+  else:
+    spending_rows = 0
+
+  if marts_ready():
     avg_withhold = run_query(
       """
       SELECT ROUND(AVG(avg_withhold_rate)::numeric, 4) AS rate
@@ -30,11 +59,7 @@ def load_kpis() -> dict:
       """
     ).iloc[0, 0]
   else:
-    providers = approx_row_count("public_intermediate", "int_providers")
-    spending_rows = approx_row_count("raw", "cms_part_d_spending")
     avg_withhold = None
-
-  utilization_rows = approx_row_count("raw", "cms_provider_utilization")
 
   return {
     "providers": providers,
@@ -57,11 +82,10 @@ st.markdown(
 )
 
 if not intermediate_ready():
-  st.error(
-    "Intermediate dbt models not found. Run:\n\n"
-    "`cd dbt && dbt run --select intermediate`"
+  st.warning(
+    "Intermediate models are unavailable in this environment. "
+    "Provider detail may be limited."
   )
-  st.stop()
 
 if not marts_ready():
   st.warning(
